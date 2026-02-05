@@ -9,6 +9,8 @@ services:
     environment:
       - VAULT_DIR=/vault
       - DATA_DIR=/data
+      - ADMIN_USERNAME=admin
+      - ADMIN_PASSWORD=admin
     restart: unless-stopped
 
 volumes:

@@ -12,7 +12,7 @@ WORKDIR /app
 
 # Install Python dependencies via pip (avoids external uv image pull)
 COPY pyproject.toml ./
-RUN pip install --no-cache-dir fastapi uvicorn[standard]
+RUN pip install --no-cache-dir fastapi uvicorn[standard] argon2-cffi
 
 # Copy application code
 COPY app/ ./app/
