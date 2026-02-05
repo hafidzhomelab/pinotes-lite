@@ -50,7 +50,7 @@ class LoginRequest(BaseModel):
 
 
 @app.post("/api/auth/login")
-async def api_login(body: LoginRequest, response: Response) -> Response:
+async def api_login(body: LoginRequest, response: Response):
     """Authenticate and set session cookie."""
     result = auth.login(body.username, body.password)
     if result.locked_until:
@@ -68,7 +68,7 @@ async def api_login(body: LoginRequest, response: Response) -> Response:
         samesite="lax",
         path="/",
     )
-    return JSONResponse({"authenticated": True})
+    return {"authenticated": True}
 
 
 @app.post("/api/auth/logout")
@@ -117,7 +117,7 @@ if (STATIC_DIR / "assets").is_dir():
 
 # Catch-all — return index.html so React Router handles client-side routes.
 @app.get("/{full_path:path}")
-async def spa_fallback() -> Response:
+async def spa_fallback() -> FileResponse:
     if INDEX_HTML.exists():
         return FileResponse(str(INDEX_HTML))
     return JSONResponse(
