@@ -3,4 +3,13 @@ services:
     build: .
     ports:
       - "${PORT:-8090}:8000"
+    volumes:
+      - /home/professor/notes:/vault:ro   # notes vault — read-only
+      - pinotes_lite_data:/data           # app data (SQLite, search index)
+    environment:
+      - VAULT_DIR=/vault
+      - DATA_DIR=/data
     restart: unless-stopped
+
+volumes:
+  pinotes_lite_data:
