@@ -4,6 +4,8 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
 
+import mimetypes
+
 from fastapi import Cookie, Depends, FastAPI, HTTPException
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
@@ -115,6 +117,16 @@ async def api_read_note(path: str, _user_id: int = Depends(require_auth)) -> dic
     from app.notes import read_note
 
     return read_note(path)
+
+
+@app.get("/api/attachments/{path:path}")
+async def api_attachment(path: str, _user_id: int = Depends(require_auth)) -> Response:
+    """Serve any file from the vault with auto-detected Content-Type."""
+    from app.pathguard import resolve_attachment
+
+    resolved = resolve_attachment(path)
+    media_type = mimetypes.guess_type(str(resolved))[0] or "application/octet-stream"
+    return FileResponse(str(resolved), media_type=media_type)
 
 
 # ── Static files + SPA fallback ──────────────────────────────────────────────
