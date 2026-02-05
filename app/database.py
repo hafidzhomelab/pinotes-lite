@@ -10,13 +10,16 @@ def init_db() -> None:
     """Create the SQLite database and tables if they don't exist."""
     db_path = config.get().data_dir / "pinotes_lite.db"
     conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
     try:
         conn.executescript(
             """
             CREATE TABLE IF NOT EXISTS users (
                 id INTEGER PRIMARY KEY,
                 username TEXT UNIQUE NOT NULL,
-                password_hash TEXT NOT NULL
+                password_hash TEXT NOT NULL,
+                failed_attempts INTEGER DEFAULT 0,
+                locked_until REAL DEFAULT 0
             );
 
             CREATE TABLE IF NOT EXISTS sessions (
@@ -29,6 +32,15 @@ def init_db() -> None:
             );
             """
         )
+        columns = {
+            row["name"] for row in conn.execute("PRAGMA table_info(users)").fetchall()
+        }
+        if "failed_attempts" not in columns:
+            conn.execute(
+                "ALTER TABLE users ADD COLUMN failed_attempts INTEGER DEFAULT 0"
+            )
+        if "locked_until" not in columns:
+            conn.execute("ALTER TABLE users ADD COLUMN locked_until REAL DEFAULT 0")
         conn.commit()
         print(f"  ℹ  Database initialised: {db_path}")
     finally:

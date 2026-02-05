@@ -8,6 +8,7 @@ function App() {
   const [password, setPassword] = useState('')
   const [loginError, setLoginError] = useState('')
   const [loggingIn, setLoggingIn] = useState(false)
+  const [lockoutUntil, setLockoutUntil] = useState(null) // Date object or null
 
   // Check auth state on mount
   useEffect(() => {
@@ -27,6 +28,8 @@ function App() {
     }
   }, [authenticated])
 
+  const isLocked = lockoutUntil && new Date() < lockoutUntil
+
   const handleLogin = async (e) => {
     e.preventDefault()
     setLoggingIn(true)
@@ -43,6 +46,14 @@ function App() {
         setAuthenticated(true)
         setUsername('')
         setPassword('')
+        setLockoutUntil(null)
+      } else if (res.status === 429) {
+        const data = await res.json()
+        const lockTime = new Date(data.locked_until)
+        setLockoutUntil(lockTime)
+        const hh = String(lockTime.getHours()).padStart(2, '0')
+        const mm = String(lockTime.getMinutes()).padStart(2, '0')
+        setLoginError(`Account locked. Try again at ${hh}:${mm}.`)
       } else {
         setLoginError('Invalid credentials')
       }
@@ -82,6 +93,7 @@ function App() {
               value={username}
               onChange={(e) => setUsername(e.target.value)}
               autoComplete="username"
+              disabled={isLocked}
               required
             />
             <input
@@ -90,9 +102,10 @@ function App() {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               autoComplete="current-password"
+              disabled={isLocked}
               required
             />
-            <button type="submit" disabled={loggingIn}>
+            <button type="submit" disabled={loggingIn || isLocked}>
               {loggingIn ? 'Signing in...' : 'Sign in'}
             </button>
             {loginError && <p className="login-error">{loginError}</p>}

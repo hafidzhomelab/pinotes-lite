@@ -3,6 +3,7 @@
 import os
 import secrets
 import time
+from dataclasses import dataclass
 
 from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError
@@ -14,6 +15,14 @@ _ph = PasswordHasher(time_cost=3, memory_cost=65536, parallelism=4)
 
 # Session expiry in hours (default 24)
 SESSION_EXPIRY_HOURS = int(os.environ.get("SESSION_EXPIRY_HOURS", "24"))
+LOGIN_MAX_FAILURES = int(os.environ.get("LOGIN_MAX_FAILURES", "5"))
+LOGIN_LOCKOUT_MINUTES = int(os.environ.get("LOGIN_LOCKOUT_MINUTES", "15"))
+
+
+@dataclass
+class LoginResult:
+    token: str | None = None
+    locked_until: float | None = None
 
 
 def bootstrap_admin() -> None:
@@ -49,23 +58,41 @@ def bootstrap_admin() -> None:
         conn.close()
 
 
-def login(username: str, password: str) -> str | None:
+def login(username: str, password: str) -> LoginResult:
     """Authenticate user and create a session.
 
-    Returns a session token on success, None on failure.
+    Returns a LoginResult with token or lockout details.
     """
     conn = get_db()
     try:
         row = conn.execute(
-            "SELECT id, password_hash FROM users WHERE username = ?", (username,)
+            "SELECT id, password_hash, failed_attempts, locked_until FROM users WHERE username = ?",
+            (username,),
         ).fetchone()
         if row is None:
-            return None
+            return LoginResult()
+
+        if row["locked_until"] > time.time():
+            return LoginResult(locked_until=row["locked_until"])
 
         try:
             _ph.verify(row["password_hash"], password)
         except VerifyMismatchError:
-            return None
+            new_failures = row["failed_attempts"] + 1
+            if new_failures >= LOGIN_MAX_FAILURES:
+                locked_until_ts = time.time() + LOGIN_LOCKOUT_MINUTES * 60
+                conn.execute(
+                    "UPDATE users SET failed_attempts = ?, locked_until = ? WHERE id = ?",
+                    (new_failures, locked_until_ts, row["id"]),
+                )
+                conn.commit()
+                return LoginResult(locked_until=locked_until_ts)
+            conn.execute(
+                "UPDATE users SET failed_attempts = ? WHERE id = ?",
+                (new_failures, row["id"]),
+            )
+            conn.commit()
+            return LoginResult()
 
         # Check if rehash is needed (argon2-cffi handles param upgrades)
         if _ph.check_needs_rehash(row["password_hash"]):
@@ -74,6 +101,12 @@ def login(username: str, password: str) -> str | None:
                 "UPDATE users SET password_hash = ? WHERE id = ?", (new_hash, row["id"])
             )
             conn.commit()
+
+        conn.execute(
+            "UPDATE users SET failed_attempts = 0, locked_until = 0 WHERE id = ?",
+            (row["id"],),
+        )
+        conn.commit()
 
         # Create session
         token = secrets.token_hex(32)
@@ -84,7 +117,7 @@ def login(username: str, password: str) -> str | None:
             (row["id"], token, now, expires_at),
         )
         conn.commit()
-        return token
+        return LoginResult(token=token)
     finally:
         conn.close()
 
