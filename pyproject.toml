@@ -8,5 +8,11 @@ dependencies = [
     "uvicorn[standard]>=0.34.0",
 ]
 
+[dependency-groups]
+dev = ["pytest>=7.0"]
+
 [tool.uv]
 preview = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
