@@ -109,6 +109,14 @@ async def api_tree(_user_id: int = Depends(require_auth)) -> dict:
     return get_tree()
 
 
+@app.get("/api/notes/{path:path}")
+async def api_read_note(path: str, _user_id: int = Depends(require_auth)) -> dict:
+    """Read a single note — returns parsed frontmatter + raw Markdown body."""
+    from app.notes import read_note
+
+    return read_note(path)
+
+
 # ── Static files + SPA fallback ──────────────────────────────────────────────
 # Vite build output: <project-root>/frontend/dist/
 # Layout is identical inside the Docker image.
