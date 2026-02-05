@@ -1,6 +1,7 @@
 """PiNotes Lite — FastAPI backend."""
 
 from contextlib import asynccontextmanager
+from datetime import datetime
 from pathlib import Path
 
 from fastapi import Cookie, Depends, FastAPI, HTTPException
@@ -49,9 +50,15 @@ class LoginRequest(BaseModel):
 
 
 @app.post("/api/auth/login")
-async def api_login(body: LoginRequest, response: Response) -> dict:
+async def api_login(body: LoginRequest, response: Response) -> Response:
     """Authenticate and set session cookie."""
-    token = auth.login(body.username, body.password)
+    result = auth.login(body.username, body.password)
+    if result.locked_until:
+        return JSONResponse(
+            {"locked_until": datetime.fromtimestamp(result.locked_until).isoformat()},
+            status_code=429,
+        )
+    token = result.token
     if token is None:
         raise HTTPException(status_code=401, detail="Invalid credentials")
     response.set_cookie(
@@ -61,7 +68,7 @@ async def api_login(body: LoginRequest, response: Response) -> dict:
         samesite="lax",
         path="/",
     )
-    return {"authenticated": True}
+    return JSONResponse({"authenticated": True})
 
 
 @app.post("/api/auth/logout")
@@ -110,7 +117,7 @@ if (STATIC_DIR / "assets").is_dir():
 
 # Catch-all — return index.html so React Router handles client-side routes.
 @app.get("/{full_path:path}")
-async def spa_fallback() -> FileResponse:
+async def spa_fallback() -> Response:
     if INDEX_HTML.exists():
         return FileResponse(str(INDEX_HTML))
     return JSONResponse(
