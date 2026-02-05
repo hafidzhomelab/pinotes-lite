@@ -3,11 +3,12 @@
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi import Cookie, Depends, FastAPI, HTTPException
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 
-from app import config
+from app import auth, config, database
 
 
 # ── Lifespan (startup / shutdown) ────────────────────────────────────────────
@@ -17,6 +18,8 @@ from app import config
 async def lifespan(_app: FastAPI):
     # Startup ── load + validate config (sys.exit on error)
     config.load()
+    database.init_db()
+    auth.bootstrap_admin()
     yield
     # Shutdown ── nothing to clean up yet
 
@@ -26,12 +29,65 @@ async def lifespan(_app: FastAPI):
 app = FastAPI(title="PiNotes Lite", lifespan=lifespan)
 
 
+# ── Auth dependency ──────────────────────────────────────────────────────────
+
+
+def require_auth(session: str | None = Cookie(default=None)) -> int:
+    """Validate session cookie and return user_id. Raises 401 if invalid."""
+    user_id = auth.validate_session(session) if session else None
+    if user_id is None:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    return user_id
+
+
+# ── Auth routes ──────────────────────────────────────────────────────────────
+
+
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+
+@app.post("/api/auth/login")
+async def api_login(body: LoginRequest, response: Response) -> dict:
+    """Authenticate and set session cookie."""
+    token = auth.login(body.username, body.password)
+    if token is None:
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    response.set_cookie(
+        key="session",
+        value=token,
+        httponly=True,
+        samesite="lax",
+        path="/",
+    )
+    return {"authenticated": True}
+
+
+@app.post("/api/auth/logout")
+async def api_logout(
+    response: Response, session: str | None = Cookie(default=None)
+) -> dict:
+    """Clear session cookie and delete session."""
+    if session:
+        auth.logout(session)
+    response.delete_cookie(key="session", path="/")
+    return {}
+
+
+@app.get("/api/auth/me")
+async def api_me(session: str | None = Cookie(default=None)) -> dict:
+    """Check if current session is authenticated."""
+    user_id = auth.validate_session(session) if session else None
+    return {"authenticated": user_id is not None}
+
+
 # ── API routes ───────────────────────────────────────────────────────────────
 
 
 @app.get("/api/healthz")
-async def healthz() -> dict:
-    """Liveness / health check."""
+async def healthz(_user_id: int = Depends(require_auth)) -> dict:
+    """Liveness / health check (requires auth)."""
     return {"status": "ok"}
 
 
