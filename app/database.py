@@ -30,6 +30,17 @@ def init_db() -> None:
                 expires_at REAL NOT NULL,
                 FOREIGN KEY (user_id) REFERENCES users(id)
             );
+
+            CREATE VIRTUAL TABLE IF NOT EXISTS notes_fts USING fts5(
+                path UNINDEXED,
+                title,
+                body
+            );
+
+            CREATE TABLE IF NOT EXISTS notes_index_meta (
+                path TEXT PRIMARY KEY,
+                mtime REAL NOT NULL
+            );
             """
         )
         columns = {

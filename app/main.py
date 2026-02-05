@@ -11,7 +11,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from app import auth, config, database
+from app import auth, config, database, search
 
 
 # ── Lifespan (startup / shutdown) ────────────────────────────────────────────
@@ -23,8 +23,11 @@ async def lifespan(_app: FastAPI):
     config.load()
     database.init_db()
     auth.bootstrap_admin()
-    yield
-    # Shutdown ── nothing to clean up yet
+    search.search_manager.start()
+    try:
+        yield
+    finally:
+        await search.search_manager.stop()
 
 
 # ── App ──────────────────────────────────────────────────────────────────────
@@ -117,6 +120,12 @@ async def api_read_note(path: str, _user_id: int = Depends(require_auth)) -> dic
     from app.notes import read_note
 
     return read_note(path)
+
+
+@app.get("/api/notes/search")
+async def api_search(q: str | None = None, _user_id: int = Depends(require_auth)) -> list[dict]:
+    """Search the vault notes using the FTS index."""
+    return search.search_notes(q or "")
 
 
 @app.get("/api/attachments/{path:path}")
