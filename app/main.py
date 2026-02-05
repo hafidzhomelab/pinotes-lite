@@ -98,6 +98,17 @@ async def healthz(_user_id: int = Depends(require_auth)) -> dict:
     return {"status": "ok"}
 
 
+# ── Notes API ────────────────────────────────────────────────────────────────
+
+
+@app.get("/api/notes/tree")
+async def api_tree(_user_id: int = Depends(require_auth)) -> dict:
+    """Return the full vault file tree (filtered, cached)."""
+    from app.tree import get_tree
+
+    return get_tree()
+
+
 # ── Static files + SPA fallback ──────────────────────────────────────────────
 # Vite build output: <project-root>/frontend/dist/
 # Layout is identical inside the Docker image.
