@@ -114,18 +114,18 @@ async def api_tree(_user_id: int = Depends(require_auth)) -> dict:
     return get_tree()
 
 
+@app.get("/api/notes/search")
+async def api_search(q: str | None = None, _user_id: int = Depends(require_auth)) -> list[dict]:
+    """Search the vault notes using the FTS index."""
+    return search.search_notes(q or "")
+
+
 @app.get("/api/notes/{path:path}")
 async def api_read_note(path: str, _user_id: int = Depends(require_auth)) -> dict:
     """Read a single note — returns parsed frontmatter + raw Markdown body."""
     from app.notes import read_note
 
     return read_note(path)
-
-
-@app.get("/api/notes/search")
-async def api_search(q: str | None = None, _user_id: int = Depends(require_auth)) -> list[dict]:
-    """Search the vault notes using the FTS index."""
-    return search.search_notes(q or "")
 
 
 @app.get("/api/attachments/{path:path}")
