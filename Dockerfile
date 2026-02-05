@@ -10,12 +10,9 @@ RUN npm run build          # → /frontend/dist/
 FROM python:3.11-slim AS runtime
 WORKDIR /app
 
-# Drop in uv
-COPY --from=astral-sh/uv:latest /uv /usr/local/bin/uv
-
-# Install Python dependencies (cached layer)
-COPY pyproject.toml uv.lock* ./
-RUN uv sync --no-dev --frozen
+# Install Python dependencies via pip (avoids external uv image pull)
+COPY pyproject.toml ./
+RUN pip install --no-cache-dir fastapi uvicorn[standard]
 
 # Copy application code
 COPY app/ ./app/
@@ -25,4 +22,4 @@ COPY --from=frontend-build /frontend/dist/ ./frontend/dist/
 
 EXPOSE 8000
 
-CMD ["uv", "run", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
