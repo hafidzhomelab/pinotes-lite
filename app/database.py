@@ -10,6 +10,7 @@ def init_db() -> None:
     """Create the SQLite database and tables if they don't exist."""
     db_path = config.get().data_dir / "pinotes_lite.db"
     conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
     try:
         conn.executescript(
             """
