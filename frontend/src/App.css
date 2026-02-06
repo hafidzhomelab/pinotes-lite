@@ -144,6 +144,7 @@ body {
 .tree-section {
   flex: 1;
   min-height: 0;
+  max-height: 50vh;  /* Limit vertical space, make tree scrollable */
 }
 
 .tree-header {
