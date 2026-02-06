@@ -616,7 +616,7 @@ function renderTree(nodes, parentPath, expandedDirs, selectedPath, selectNote, t
                 style={{ '--tree-depth': depth }}
                 onClick={() => selectNote(node.path)}
               >
-                {node.name}
+                <span>{node.name}</span>
               </button>
             </li>
           )
