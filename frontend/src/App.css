@@ -277,8 +277,18 @@ body {
   cursor: pointer;
 }
 
+.tree-node:not(.active) .tree-link {
+  color: var(--muted);
+  opacity: 0.78;
+}
+
 .tree-link:hover {
   background: #f1f5f9;
+}
+
+.tree-node:not(.active) .tree-link:hover {
+  color: #0f172a;
+  opacity: 0.95;
 }
 
 .tree-node.tree-dir .tree-link {
