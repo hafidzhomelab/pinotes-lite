@@ -266,7 +266,12 @@ body {
 }
 
 .tree-link {
-  all: unset;
+  background: none;
+  border: none;
+  margin: 0;
+  padding: 0;
+  font: inherit;
+  text-align: left;
   display: flex;
   align-items: flex-start;
   gap: 0.4rem;
