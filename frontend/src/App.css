@@ -10,6 +10,7 @@
   --accent: #38bdf8;
   --danger: #dc2626;
   --success: #16a34a;
+  --tree-indent: 1.2rem;
 }
 
 * {
@@ -269,6 +270,7 @@ body {
   gap: 0.4rem;
   width: 100%;
   padding: 0.35rem 0.5rem;
+  padding-left: calc(0.5rem + (var(--tree-depth, 0) * var(--tree-indent)));
   border-radius: 8px;
   font-size: 0.95rem;
   color: #0f172a;

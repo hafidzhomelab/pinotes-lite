@@ -572,7 +572,7 @@ function App() {
   )
 }
 
-function renderTree(nodes, parentPath, expandedDirs, selectedPath, selectNote, toggleDir) {
+function renderTree(nodes, parentPath, expandedDirs, selectedPath, selectNote, toggleDir, depth = 0) {
   return (
     <ul className="tree-list">
       {nodes.map((node) => {
@@ -584,6 +584,7 @@ function renderTree(nodes, parentPath, expandedDirs, selectedPath, selectNote, t
               <button
                 type="button"
                 className="tree-link"
+                style={{ '--tree-depth': depth }}
                 onClick={() => toggleDir(dirPath)}
                 aria-expanded={isExpanded}
               >
@@ -592,7 +593,16 @@ function renderTree(nodes, parentPath, expandedDirs, selectedPath, selectNote, t
                 </span>
                 <span>{node.name}</span>
               </button>
-              {isExpanded && renderTree(node.children ?? [], dirPath, expandedDirs, selectedPath, selectNote, toggleDir)}
+              {isExpanded &&
+                renderTree(
+                  node.children ?? [],
+                  dirPath,
+                  expandedDirs,
+                  selectedPath,
+                  selectNote,
+                  toggleDir,
+                  depth + 1
+                )}
             </li>
           )
         }
@@ -600,7 +610,12 @@ function renderTree(nodes, parentPath, expandedDirs, selectedPath, selectNote, t
           const isActive = selectedPath === node.path
           return (
             <li key={node.path} className={`tree-node tree-file${isActive ? ' active' : ''}`}>
-              <button type="button" className="tree-link" onClick={() => selectNote(node.path)}>
+              <button
+                type="button"
+                className="tree-link"
+                style={{ '--tree-depth': depth }}
+                onClick={() => selectNote(node.path)}
+              >
                 {node.name}
               </button>
             </li>
