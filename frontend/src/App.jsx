@@ -1,16 +1,199 @@
-import { useState, useEffect } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
+import rehypeHighlight from 'rehype-highlight'
+import rehypeSanitize from 'rehype-sanitize'
 import './App.css'
 
+const ATTACHMENTS_ROUTE = '/api/attachments'
+
+function encodePathSegments(path) {
+  return path
+    .split('/')
+    .map((segment) => encodeURIComponent(segment))
+    .join('/')
+}
+
+function createAttachmentUrl(relativePath) {
+  if (!relativePath) {
+    return ATTACHMENTS_ROUTE
+  }
+  const normalized = relativePath.replace(/^\/+/, '')
+  return `${ATTACHMENTS_ROUTE}/${encodePathSegments(normalized)}`
+}
+
+function expandDirectorySet(prevSet, notePath) {
+  const next = new Set(prevSet)
+  const segments = notePath.split('/')
+  let current = ''
+  for (let i = 0; i < segments.length - 1; i += 1) {
+    current = current ? `${current}/${segments[i]}` : segments[i]
+    next.add(current)
+  }
+  return next
+}
+
+function findFirstNotePath(node) {
+  if (!node?.children?.length) {
+    return null
+  }
+  for (const child of node.children) {
+    if (child.type === 'file') {
+      return child.path
+    }
+    if (child.type === 'dir') {
+      const nested = findFirstNotePath(child)
+      if (nested) {
+        return nested
+      }
+    }
+  }
+  return null
+}
+
+function isAbsoluteOrRemote(src) {
+  if (!src) {
+    return true
+  }
+  const trimmed = src.trim()
+  return (
+    trimmed.startsWith('/') ||
+    trimmed.startsWith('http://') ||
+    trimmed.startsWith('https://') ||
+    trimmed.startsWith('data:') ||
+    trimmed.startsWith('//')
+  )
+}
+
+function normalizeRelativePath(baseDir, relativePath) {
+  const baseParts = baseDir ? baseDir.split('/').filter(Boolean) : []
+  const parts = relativePath.split('/')
+  const stack = [...baseParts]
+  for (const part of parts) {
+    if (!part || part === '.') {
+      continue
+    }
+    if (part === '..') {
+      if (stack.length) {
+        stack.pop()
+      }
+      continue
+    }
+    stack.push(part)
+  }
+  return stack.join('/')
+}
+
+function rewriteObsidianEmbeds(body) {
+  return body.replace(/!\[\[(.+?)\]\]/g, (_, inner) => {
+    const [rawPath, rawAlt] = inner.split('|')
+    const trimmedPath = rawPath?.trim()
+    if (!trimmedPath) {
+      return ''
+    }
+    const alt = rawAlt?.trim() ?? ''
+    return `![${alt}](${createAttachmentUrl(`_attachments/${trimmedPath}`)})`
+  })
+}
+
+function rewriteRelativeImages(body, notePath) {
+  const noteDir = notePath.includes('/') ? notePath.slice(0, notePath.lastIndexOf('/')) : ''
+  return body.replace(/!\[([^\]]*?)\]\(([^)]+)\)/g, (match, alt, src) => {
+    const trimmedSrc = src.trim()
+    if (!trimmedSrc || isAbsoluteOrRemote(trimmedSrc)) {
+      return match
+    }
+    const resolved = normalizeRelativePath(noteDir, trimmedSrc)
+    if (!resolved) {
+      return match
+    }
+    return `![${alt}](${createAttachmentUrl(resolved)})`
+  })
+}
+
+function rewriteNoteBody(note) {
+  if (!note) {
+    return ''
+  }
+  let markdown = note.body ?? ''
+  markdown = rewriteObsidianEmbeds(markdown)
+  markdown = rewriteRelativeImages(markdown, note.path)
+  return markdown
+}
+
+function formatMetaValue(key, value) {
+  if (key === 'created' || key === 'updated') {
+    const parsed = new Date(value)
+    if (!Number.isNaN(parsed.valueOf())) {
+      return parsed.toLocaleString()
+    }
+  }
+  if (Array.isArray(value)) {
+    return value.join(', ')
+  }
+  if (typeof value === 'object' && value !== null) {
+    return JSON.stringify(value)
+  }
+  if (value === null || value === undefined) {
+    return ''
+  }
+  return String(value)
+}
+
+function encodeNotePath(path) {
+  return encodePathSegments(path)
+}
+
+function ImageWithFallback({ src, alt }) {
+  const [failed, setFailed] = useState(false)
+
+  if (failed) {
+    return (
+      <div className="image-placeholder">
+        <span>{alt || 'Image not available'}</span>
+        <small>Image could not be loaded.</small>
+      </div>
+    )
+  }
+
+  return (
+    <img
+      src={src}
+      alt={alt}
+      loading="lazy"
+      onError={() => setFailed(true)}
+    />
+  )
+}
+
 function App() {
-  const [authenticated, setAuthenticated] = useState(null) // null = checking
-  const [health, setHealth] = useState(null) // null | 'ok' | 'error'
+  const [authenticated, setAuthenticated] = useState(null)
+  const [health, setHealth] = useState(null)
+  const [tree, setTree] = useState(null)
+  const [treeError, setTreeError] = useState('')
+  const [selectedPath, setSelectedPath] = useState('')
+  const [note, setNote] = useState(null)
+  const [noteError, setNoteError] = useState('')
+  const [loadingNote, setLoadingNote] = useState(false)
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [loginError, setLoginError] = useState('')
   const [loggingIn, setLoggingIn] = useState(false)
-  const [lockoutUntil, setLockoutUntil] = useState(null) // Date object or null
+  const [lockoutUntil, setLockoutUntil] = useState(null)
+  const [expandedDirs, setExpandedDirs] = useState(() => new Set(['']))
+  const [searchQuery, setSearchQuery] = useState('')
+  const [searchResults, setSearchResults] = useState([])
+  const [searching, setSearching] = useState(false)
+  const [searchError, setSearchError] = useState('')
+  const [frontmatterOpen, setFrontmatterOpen] = useState(false)
 
-  // Check auth state on mount
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return
+    }
+    setFrontmatterOpen(window.innerWidth >= 768)
+  }, [])
+
   useEffect(() => {
     fetch('/api/auth/me')
       .then((res) => res.json())
@@ -18,20 +201,79 @@ function App() {
       .catch(() => setAuthenticated(false))
   }, [])
 
-  // Fetch health when authenticated
   useEffect(() => {
-    if (authenticated) {
-      fetch('/api/healthz')
-        .then((res) => res.json())
-        .then((data) => setHealth(data.status))
-        .catch(() => setHealth('error'))
+    if (!authenticated) {
+      return
     }
+    setTree(null)
+    setTreeError('')
+    fetch('/api/notes/tree')
+      .then((res) => {
+        if (!res.ok) {
+          throw new Error('Unable to load vault')
+        }
+        return res.json()
+      })
+      .then((data) => setTree(data))
+      .catch((error) => setTreeError(error.message || 'Unable to load vault tree'))
   }, [authenticated])
 
-  const isLocked = lockoutUntil && new Date() < lockoutUntil
+  useEffect(() => {
+    if (!authenticated) {
+      return
+    }
+    fetch('/api/healthz')
+      .then((res) => res.json())
+      .then((data) => setHealth(data.status))
+      .catch(() => setHealth('error'))
+  }, [authenticated])
 
-  const handleLogin = async (e) => {
-    e.preventDefault()
+  useEffect(() => {
+    if (!tree) {
+      return
+    }
+    if (selectedPath) {
+      return
+    }
+    const first = findFirstNotePath(tree)
+    if (first) {
+      setExpandedDirs((prev) => expandDirectorySet(prev, first))
+      setSelectedPath(first)
+    }
+  }, [tree, selectedPath])
+
+  useEffect(() => {
+    if (!selectedPath) {
+      setNote(null)
+      setNoteError('')
+      return
+    }
+    setLoadingNote(true)
+    setNoteError('')
+    fetch(`/api/notes/${encodeNotePath(selectedPath)}`)
+      .then((res) => {
+        if (!res.ok) {
+          throw new Error('Note not available')
+        }
+        return res.json()
+      })
+      .then((data) => setNote(data))
+      .catch((error) => setNoteError(error.message || 'Unable to load note.'))
+      .finally(() => setLoadingNote(false))
+  }, [selectedPath])
+
+  useEffect(() => {
+    if (searchQuery.trim()) {
+      return
+    }
+    setSearchResults([])
+    setSearchError('')
+  }, [searchQuery])
+
+  const transformedBody = useMemo(() => rewriteNoteBody(note), [note])
+
+  const handleLogin = async (event) => {
+    event.preventDefault()
     setLoggingIn(true)
     setLoginError('')
 
@@ -47,18 +289,22 @@ function App() {
         setUsername('')
         setPassword('')
         setLockoutUntil(null)
-      } else if (res.status === 429) {
+        return
+      }
+
+      if (res.status === 429) {
         const data = await res.json()
         const lockTime = new Date(data.locked_until)
         setLockoutUntil(lockTime)
         const hh = String(lockTime.getHours()).padStart(2, '0')
         const mm = String(lockTime.getMinutes()).padStart(2, '0')
         setLoginError(`Account locked. Try again at ${hh}:${mm}.`)
-      } else {
-        setLoginError('Invalid credentials')
+        return
       }
+
+      setLoginError('Invalid username or password.')
     } catch {
-      setLoginError('Network error')
+      setLoginError('Network error. Check your connection.')
     } finally {
       setLoggingIn(false)
     }
@@ -69,19 +315,62 @@ function App() {
     window.location.reload()
   }
 
-  // Loading state
+  const toggleDirectory = (path) => {
+    setExpandedDirs((prev) => {
+      const next = new Set(prev)
+      if (next.has(path)) {
+        next.delete(path)
+      } else {
+        next.add(path)
+      }
+      return next
+    })
+  }
+
+  const handleSelectNote = (path) => {
+    setExpandedDirs((prev) => expandDirectorySet(prev, path))
+    setSelectedPath(path)
+  }
+
+  const handleSearch = async (event) => {
+    event.preventDefault()
+    const query = searchQuery.trim()
+    if (!query) {
+      setSearchResults([])
+      return
+    }
+    setSearching(true)
+    setSearchError('')
+    try {
+      const res = await fetch(`/api/notes/search?q=${encodeURIComponent(query)}`)
+      if (!res.ok) {
+        throw new Error('Search failed')
+      }
+      const data = await res.json()
+      setSearchResults(data)
+    } catch (error) {
+      setSearchError(error.message || 'Search is currently unavailable.')
+    } finally {
+      setSearching(false)
+    }
+  }
+
+  const handleSearchResultClick = (path) => {
+    handleSelectNote(path)
+  }
+
   if (authenticated === null) {
     return (
       <div className="app">
         <div className="login-card">
-          <p>Loading...</p>
+          <p>Checking authentication…</p>
         </div>
       </div>
     )
   }
 
-  // Login form
   if (!authenticated) {
+    const isLocked = lockoutUntil && new Date() < lockoutUntil
     return (
       <div className="app">
         <div className="login-card">
@@ -91,7 +380,7 @@ function App() {
               type="text"
               placeholder="Username"
               value={username}
-              onChange={(e) => setUsername(e.target.value)}
+              onChange={(event) => setUsername(event.target.value)}
               autoComplete="username"
               disabled={isLocked}
               required
@@ -100,13 +389,13 @@ function App() {
               type="password"
               placeholder="Password"
               value={password}
-              onChange={(e) => setPassword(e.target.value)}
+              onChange={(event) => setPassword(event.target.value)}
               autoComplete="current-password"
               disabled={isLocked}
               required
             />
             <button type="submit" disabled={loggingIn || isLocked}>
-              {loggingIn ? 'Signing in...' : 'Sign in'}
+              {loggingIn ? 'Signing in…' : 'Sign in'}
             </button>
             {loginError && <p className="login-error">{loginError}</p>}
           </form>
@@ -115,25 +404,211 @@ function App() {
     )
   }
 
-  // Authenticated view
+  const noteTitle = note?.frontmatter?.title
+    ? note.frontmatter.title
+    : selectedPath?.split('/').pop()
+
   return (
     <div className="app">
-      <header className="app-header">
-        <h1>PiNotes Lite</h1>
-        <button onClick={handleLogout} className="logout-btn">
-          Logout
-        </button>
-      </header>
+      <div className="app-shell">
+        <header className="app-header">
+          <div>
+            <p className="eyebrow">PiNotes Lite · Tailscale-only notes viewer</p>
+            <h1>PiNotes Lite</h1>
+          </div>
+          <div className="header-actions">
+            <div className="health-status">
+              Backend:{' '}
+              <span className={`health-badge health-${health ?? 'pending'}`}>
+                {health ?? 'checking…'}
+              </span>
+            </div>
+            <button className="logout-btn" onClick={handleLogout}>
+              Logout
+            </button>
+          </div>
+        </header>
 
-      <main className="app-main">
-        <p className="health-status">
-          Backend: <span className={`health-badge health-${health ?? 'pending'}`}>{health ?? 'checking...'}</span>
-        </p>
-        <p className="placeholder-note">
-          Scaffold complete. Next: file tree, note reader.
-        </p>
-      </main>
+        {treeError && <div className="alert error">{treeError}</div>}
+
+        <div className="app-body">
+          <aside className="sidebar">
+            <div className="sidebar-section">
+              <h2>Search notes</h2>
+              <form onSubmit={handleSearch} className="search-form">
+                <input
+                  type="search"
+                  placeholder="Search the vault"
+                  value={searchQuery}
+                  onChange={(event) => setSearchQuery(event.target.value)}
+                />
+                <button type="submit" disabled={searching}>
+                  {searching ? 'Searching…' : 'Search'}
+                </button>
+              </form>
+              {searchError && <p className="search-error">{searchError}</p>}
+              {searchResults.length > 0 ? (
+                <ul className="search-results">
+                  {searchResults.map((result) => (
+                    <li key={result.path}>
+                      <button type="button" onClick={() => handleSearchResultClick(result.path)}>
+                        <strong>{result.title}</strong>
+                        <p
+                          className="search-snippet"
+                          dangerouslySetInnerHTML={{ __html: result.snippet }}
+                        />
+                        <span className="search-path">{result.path}</span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                searchQuery.trim() && !searching ? (
+                  <p className="search-empty">No matches found.</p>
+                ) : null
+              )}
+            </div>
+
+            <div className="sidebar-section tree-section">
+              <div className="tree-header">
+                <h2>Vault tree</h2>
+                <span>{tree ? tree.children?.length ?? 0 : '…'} nodes</span>
+              </div>
+              {tree ? (
+                <nav className="tree-nav" aria-label="Vault notes">
+                  {tree.children?.length ? (
+                    renderTree(tree.children, '', expandedDirs, selectedPath, handleSelectNote, toggleDirectory)
+                  ) : (
+                    <p className="empty-state">No notes found in the vault.</p>
+                  )}
+                </nav>
+              ) : (
+                <p className="empty-state">Loading vault…</p>
+              )}
+            </div>
+          </aside>
+
+          <section className="content">
+            {noteError && <div className="alert error">{noteError}</div>}
+            {loadingNote && <p className="status">Loading note…</p>}
+            {!loadingNote && !note && (
+              <p className="status">Select a note to start reading.</p>
+            )}
+            {note && (
+              <article className="note-card">
+                <header className="note-header">
+                  <div>
+                    <p className="note-path">{note.path}</p>
+                    <h2>{noteTitle}</h2>
+                  </div>
+                </header>
+
+                {note.frontmatter && Object.keys(note.frontmatter).length > 0 && (
+                  <section className="metadata-card">
+                    <div className="metadata-header">
+                      <strong>Metadata</strong>
+                      <button
+                        type="button"
+                        className="metadata-toggle"
+                        onClick={() => setFrontmatterOpen((prev) => !prev)}
+                      >
+                        {frontmatterOpen ? 'Hide metadata' : 'Show metadata'}
+                      </button>
+                    </div>
+                    {frontmatterOpen && (
+                      <div className="metadata-content">
+                        {Array.isArray(note.frontmatter.tags) && note.frontmatter.tags.length > 0 && (
+                          <div className="metadata-tags">
+                            {note.frontmatter.tags.map((tag) => (
+                              <span key={tag} className="tag">
+                                {tag}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                        <div className="metadata-grid">
+                          {Object.entries(note.frontmatter).map(([key, value]) => {
+                            if (['tags'].includes(key)) {
+                              return null
+                            }
+                            const formatted = formatMetaValue(key, value)
+                            if (!formatted) {
+                              return null
+                            }
+                            return (
+                              <div key={key} className="metadata-row">
+                                <span className="metadata-key">{key}</span>
+                                <span className="metadata-value">{formatted}</span>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </section>
+                )}
+
+                <div className="note-body">
+                  <ReactMarkdown
+                    children={transformedBody}
+                    remarkPlugins={[remarkGfm]}
+                    rehypePlugins={[rehypeSanitize, rehypeHighlight]}
+                    components={{
+                      img: ({ src, alt }) => <ImageWithFallback src={src} alt={alt} />,
+                      a: ({ href, children }) => (
+                        <a href={href} target="_blank" rel="noreferrer">
+                          {children}
+                        </a>
+                      ),
+                    }}
+                  />
+                </div>
+              </article>
+            )}
+          </section>
+        </div>
+      </div>
     </div>
+  )
+}
+
+function renderTree(nodes, parentPath, expandedDirs, selectedPath, selectNote, toggleDir) {
+  return (
+    <ul className="tree-list">
+      {nodes.map((node) => {
+        if (node.type === 'dir') {
+          const dirPath = parentPath ? `${parentPath}/${node.name}` : node.name
+          const isExpanded = expandedDirs.has(dirPath)
+          return (
+            <li key={dirPath} className="tree-node tree-dir">
+              <button
+                type="button"
+                className="tree-link"
+                onClick={() => toggleDir(dirPath)}
+                aria-expanded={isExpanded}
+              >
+                <span className="tree-toggle" aria-hidden="true">
+                  {isExpanded ? '▾' : '▸'}
+                </span>
+                <span>{node.name}</span>
+              </button>
+              {isExpanded && renderTree(node.children ?? [], dirPath, expandedDirs, selectedPath, selectNote, toggleDir)}
+            </li>
+          )
+        }
+        if (node.type === 'file') {
+          const isActive = selectedPath === node.path
+          return (
+            <li key={node.path} className={`tree-node tree-file${isActive ? ' active' : ''}`}>
+              <button type="button" className="tree-link" onClick={() => selectNote(node.path)}>
+                {node.name}
+              </button>
+            </li>
+          )
+        }
+        return null
+      })}
+    </ul>
   )
 }
 
