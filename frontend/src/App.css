@@ -146,6 +146,7 @@ body {
   flex: 1;
   min-height: 0;
   max-height: 50vh;  /* Limit vertical space, make tree scrollable */
+  overflow-x: hidden;
 }
 
 .tree-header {
@@ -245,6 +246,7 @@ body {
 
 .tree-nav {
   overflow-y: auto;
+  overflow-x: hidden;
   max-height: calc(100% - 35px);
   padding-right: 0.25rem;
 }
@@ -269,12 +271,16 @@ body {
   align-items: center;
   gap: 0.4rem;
   width: 100%;
+  max-width: 100%;
   padding: 0.35rem 0.5rem;
   padding-left: calc(0.5rem + (var(--tree-depth, 0) * var(--tree-indent)));
   border-radius: 8px;
   font-size: 0.95rem;
   color: #0f172a;
   cursor: pointer;
+  white-space: normal;
+  overflow-wrap: break-word;
+  word-break: break-word;
 }
 
 .tree-node:not(.active) .tree-link {
