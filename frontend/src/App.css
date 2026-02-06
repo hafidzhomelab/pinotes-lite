@@ -10,6 +10,7 @@
   --accent: #38bdf8;
   --danger: #dc2626;
   --success: #16a34a;
+  --tree-indent: 1.2rem;
 }
 
 * {
@@ -145,6 +146,7 @@ body {
   flex: 1;
   min-height: 0;
   max-height: 50vh;  /* Limit vertical space, make tree scrollable */
+  overflow-x: hidden;
 }
 
 .tree-header {
@@ -244,6 +246,7 @@ body {
 
 .tree-nav {
   overflow-y: auto;
+  overflow-x: hidden;
   max-height: calc(100% - 35px);
   padding-right: 0.25rem;
 }
@@ -263,20 +266,48 @@ body {
 }
 
 .tree-link {
-  all: unset;
+  background: none;
+  border: none;
+  margin: 0;
+  padding: 0;
+  font: inherit;
+  text-align: left;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 0.4rem;
   width: 100%;
+  max-width: 100%;
   padding: 0.35rem 0.5rem;
+  padding-left: calc(0.5rem + (var(--tree-depth, 0) * var(--tree-indent)));
   border-radius: 8px;
   font-size: 0.95rem;
   color: #0f172a;
   cursor: pointer;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: normal;
+}
+
+.tree-link > span:not(.tree-toggle) {
+  min-width: 0;
+  flex: 1;
+  overflow-wrap: anywhere;
+  word-break: normal;
+  white-space: normal;
+}
+
+.tree-node:not(.active) .tree-link {
+  color: var(--muted);
+  opacity: 0.78;
 }
 
 .tree-link:hover {
   background: #f1f5f9;
+}
+
+.tree-node:not(.active) .tree-link:hover {
+  color: #0f172a;
+  opacity: 0.95;
 }
 
 .tree-node.tree-dir .tree-link {
