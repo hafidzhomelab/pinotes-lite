@@ -268,7 +268,7 @@ body {
 .tree-link {
   all: unset;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 0.4rem;
   width: 100%;
   max-width: 100%;
