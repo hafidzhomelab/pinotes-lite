@@ -283,6 +283,14 @@ body {
   word-break: normal;
 }
 
+.tree-link > span:not(.tree-toggle) {
+  min-width: 0;
+  flex: 1;
+  overflow-wrap: anywhere;
+  word-break: normal;
+  white-space: normal;
+}
+
 .tree-node:not(.active) .tree-link {
   color: var(--muted);
   opacity: 0.78;
