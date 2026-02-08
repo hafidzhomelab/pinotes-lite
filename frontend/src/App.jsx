@@ -6,6 +6,8 @@ import rehypeSanitize, { defaultSchema } from 'rehype-sanitize'
 import './App.css'
 import { DisambiguationModal } from './components/DisambiguationModal'
 import { LinkedMentions } from './components/LinkedMentions'
+import { TableOfContents, extractHeadings } from './components/TableOfContents'
+import { FloatingTocButton } from './components/FloatingTocButton'
 
 const ATTACHMENTS_ROUTE = '/api/attachments'
 
@@ -214,9 +216,27 @@ function ImageWithFallback({ src, alt }) {
   )
 }
 
-// Custom component for ReactMarkdown to handle wikilink clicks
-function createMarkdownComponents({ onNavigate, onDisambiguate }) {
+// Custom component for ReactMarkdown to handle wikilink clicks and TOC
+function createMarkdownComponents({ onNavigate, onDisambiguate, headings }) {
+  // Create heading components with data-heading-id
+  const headingComponents = {}
+  ;['h1', 'h2', 'h3', 'h4'].forEach((level, index) => {
+    headingComponents[level] = ({ node, children, ...props }) => {
+      const headingIndex = headings.findIndex(
+        (h) => h.level === index + 1 && h.text === children?.[0]
+      )
+      const headingId = headingIndex >= 0 ? headings[headingIndex].id : undefined
+      const Tag = level
+      return (
+        <Tag {...props} data-heading-id={headingId}>
+          {children}
+        </Tag>
+      )
+    }
+  })
+
   return {
+    ...headingComponents,
     img: ({ src, alt }) => <ImageWithFallback src={src} alt={alt} />,
     a: ({ href, children }) => {
       // Check if href is a wikilink-style reference to notes
@@ -294,6 +314,10 @@ function App() {
   // Wikilink state
   const [noteIndex, setNoteIndex] = useState({})
   const [disambiguation, setDisambiguation] = useState(null)
+
+  // Table of Contents state
+  const [tocActiveId, setTocActiveId] = useState(null)
+  const [tocCollapsed, setTocCollapsed] = useState(false)
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -400,6 +424,35 @@ function App() {
     return () => window.removeEventListener('navigate-to-note', handleNavigate)
   }, [])
 
+  // Table of Contents: IntersectionObserver for active heading
+  useEffect(() => {
+    if (!note) {
+      setTocActiveId(null)
+      return
+    }
+
+    const headings = document.querySelectorAll('[data-heading-id]')
+    if (headings.length === 0) return
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        // Find the most visible heading
+        const visible = entries.filter((e) => e.isIntersecting)
+        if (visible.length > 0) {
+          // Use the first visible one (topmost)
+          setTocActiveId(visible[0].target.dataset.headingId)
+        }
+      },
+      {
+        rootMargin: '-20% 0px -60% 0px',
+        threshold: 0,
+      }
+    )
+
+    headings.forEach((h) => observer.observe(h))
+    return () => observer.disconnect()
+  }, [note, transformedBody])
+
   // Define handleDisambiguate BEFORE transformedBody useMemo
   const handleDisambiguate = useCallback((target, matches, displayText) => {
     setDisambiguation({ target, matches, displayText })
@@ -494,6 +547,17 @@ function App() {
     handleSelectNote(path)
   }
 
+  // Table of Contents: scroll to heading
+  const scrollToHeading = useCallback((headingId) => {
+    const element = document.querySelector(`[data-heading-id="${headingId}"]`)
+    if (element) {
+      element.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }
+  }, [])
+
+  // Extract headings for TOC
+  const tocHeadings = useMemo(() => extractHeadings(note?.body || ''), [note])
+
   const handleDisambiguationSelect = (path) => {
     setDisambiguation(null)
     handleSelectNote(path)
@@ -504,8 +568,9 @@ function App() {
       createMarkdownComponents({
         onNavigate: handleSelectNote,
         onDisambiguate: handleDisambiguate,
+        headings: tocHeadings,
       }),
-    [handleSelectNote, handleDisambiguate]
+    [handleSelectNote, handleDisambiguate, tocHeadings]
   )
 
   if (authenticated === null) {
@@ -713,8 +778,28 @@ function App() {
               </article>
             )}
           </section>
+
+          {/* Table of Contents - Desktop sidebar */}
+          {note && tocHeadings.length > 0 && (
+            <TableOfContents
+              headings={tocHeadings}
+              activeId={tocActiveId}
+              onNavigate={scrollToHeading}
+              isCollapsed={tocCollapsed}
+              onToggle={() => setTocCollapsed((prev) => !prev)}
+            />
+          )}
         </div>
       </div>
+
+      {/* Floating TOC Button - Mobile */}
+      {note && tocHeadings.length > 0 && (
+        <FloatingTocButton
+          headings={tocHeadings}
+          activeId={tocActiveId}
+          onNavigate={scrollToHeading}
+        />
+      )}
 
       {disambiguation && (
         <DisambiguationModal
