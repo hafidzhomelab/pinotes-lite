@@ -120,25 +120,7 @@ async def api_search(q: str | None = None, _user_id: int = Depends(require_auth)
     return search.search_notes(q or "")
 
 
-@app.get("/api/notes/{path:path}")
-async def api_read_note(path: str, _user_id: int = Depends(require_auth)) -> dict:
-    """Read a single note — returns parsed frontmatter + raw Markdown body."""
-    from app.notes import read_note
-
-    return read_note(path)
-
-
-@app.get("/api/attachments/{path:path}")
-async def api_attachment(path: str, _user_id: int = Depends(require_auth)) -> Response:
-    """Serve any file from the vault with auto-detected Content-Type."""
-    from app.pathguard import resolve_attachment
-
-    resolved = resolve_attachment(path)
-    media_type = mimetypes.guess_type(str(resolved))[0] or "application/octet-stream"
-    return FileResponse(str(resolved), media_type=media_type)
-
-
-# ── Wikilinks API ───────────────────────────────────────────────────────────
+# ── Wikilinks API (must be before /api/notes/{path:path}) ────────────────────
 
 
 @app.get("/api/notes/index")
@@ -160,6 +142,27 @@ async def api_notes_backlinks(
 
     finder = get_backlink_finder()
     return finder.find_backlinks(filename)
+
+
+# ── Note read (catch-all - must be after specific routes) ────────────────────
+
+
+@app.get("/api/notes/{path:path}")
+async def api_read_note(path: str, _user_id: int = Depends(require_auth)) -> dict:
+    """Read a single note — returns parsed frontmatter + raw Markdown body."""
+    from app.notes import read_note
+
+    return read_note(path)
+
+
+@app.get("/api/attachments/{path:path}")
+async def api_attachment(path: str, _user_id: int = Depends(require_auth)) -> Response:
+    """Serve any file from the vault with auto-detected Content-Type."""
+    from app.pathguard import resolve_attachment
+
+    resolved = resolve_attachment(path)
+    media_type = mimetypes.guess_type(str(resolved))[0] or "application/octet-stream"
+    return FileResponse(str(resolved), media_type=media_type)
 
 
 # ── Static files + SPA fallback ──────────────────────────────────────────────
