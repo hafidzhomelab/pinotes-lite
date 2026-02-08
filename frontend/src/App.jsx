@@ -2,12 +2,24 @@ import { useEffect, useMemo, useState, useCallback } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeHighlight from 'rehype-highlight'
-import rehypeSanitize from 'rehype-sanitize'
+import rehypeSanitize, { defaultSchema } from 'rehype-sanitize'
 import './App.css'
 import { DisambiguationModal } from './components/DisambiguationModal'
 import { LinkedMentions } from './components/LinkedMentions'
 
 const ATTACHMENTS_ROUTE = '/api/attachments'
+
+// Extend the default sanitize schema to allow wikilink classes
+const sanitizeSchema = {
+  ...defaultSchema,
+  attributes: {
+    ...defaultSchema.attributes,
+    span: [
+      ...(defaultSchema.attributes?.span || []),
+      ['className', 'wikilink', 'wikilink-missing', 'ambiguous']
+    ]
+  }
+}
 
 function encodePathSegments(path) {
   return path
@@ -691,7 +703,7 @@ function App() {
                   <ReactMarkdown
                     children={transformedBody}
                     remarkPlugins={[remarkGfm]}
-                    rehypePlugins={[rehypeSanitize, rehypeHighlight]}
+                    rehypePlugins={[[rehypeSanitize, sanitizeSchema], rehypeHighlight]}
                     components={markdownComponents}
                   />
                 </div>
