@@ -6,7 +6,7 @@ from pathlib import Path
 
 import mimetypes
 
-from fastapi import Cookie, Depends, FastAPI, HTTPException
+from fastapi import Cookie, Depends, FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -136,6 +136,30 @@ async def api_attachment(path: str, _user_id: int = Depends(require_auth)) -> Re
     resolved = resolve_attachment(path)
     media_type = mimetypes.guess_type(str(resolved))[0] or "application/octet-stream"
     return FileResponse(str(resolved), media_type=media_type)
+
+
+# ── Wikilinks API ───────────────────────────────────────────────────────────
+
+
+@app.get("/api/notes/index")
+async def api_notes_index(_user_id: int = Depends(require_auth)) -> dict:
+    """Return filename -> paths mapping for wikilink resolution."""
+    from app.wikilinks import get_wikilink_index
+
+    index = get_wikilink_index().get_index()
+    return {"index": index}
+
+
+@app.get("/api/notes/backlinks")
+async def api_notes_backlinks(
+    filename: str = Query(..., description="Filename to find backlinks for"),
+    _user_id: int = Depends(require_auth)
+) -> list[dict]:
+    """Return notes that link to the given filename."""
+    from app.wikilinks import get_backlink_finder
+
+    finder = get_backlink_finder()
+    return finder.find_backlinks(filename)
 
 
 # ── Static files + SPA fallback ──────────────────────────────────────────────
