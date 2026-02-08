@@ -400,7 +400,12 @@ function App() {
     return () => window.removeEventListener('navigate-to-note', handleNavigate)
   }, [])
 
-  const transformedBody = useMemo(() => rewriteNoteBody(note, noteIndex, handleDisambiguate), [note, noteIndex])
+  // Define handleDisambiguate BEFORE transformedBody useMemo
+  const handleDisambiguate = useCallback((target, matches, displayText) => {
+    setDisambiguation({ target, matches, displayText })
+  }, [])
+
+  const transformedBody = useMemo(() => rewriteNoteBody(note, noteIndex, handleDisambiguate), [note, noteIndex, handleDisambiguate])
 
   const handleLogin = async (event) => {
     event.preventDefault()
@@ -488,10 +493,6 @@ function App() {
   const handleSearchResultClick = (path) => {
     handleSelectNote(path)
   }
-
-  const handleDisambiguate = useCallback((target, matches, displayText) => {
-    setDisambiguation({ target, matches, displayText })
-  }, [])
 
   const handleDisambiguationSelect = (path) => {
     setDisambiguation(null)
