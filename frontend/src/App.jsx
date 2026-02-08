@@ -2,13 +2,24 @@ import { useEffect, useMemo, useState, useCallback } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeHighlight from 'rehype-highlight'
-import rehypeSanitize from 'rehype-sanitize'
+import rehypeSanitize, { defaultSchema } from 'rehype-sanitize'
 import './App.css'
-import { Wikilink } from './components/Wikilink'
 import { DisambiguationModal } from './components/DisambiguationModal'
 import { LinkedMentions } from './components/LinkedMentions'
 
 const ATTACHMENTS_ROUTE = '/api/attachments'
+
+// Extend the default sanitize schema to allow wikilink classes
+const sanitizeSchema = {
+  ...defaultSchema,
+  attributes: {
+    ...defaultSchema.attributes,
+    span: [
+      ...(defaultSchema.attributes?.span || []),
+      ['className', 'wikilink', 'wikilink-missing', 'ambiguous']
+    ]
+  }
+}
 
 function encodePathSegments(path) {
   return path
@@ -114,14 +125,48 @@ function rewriteRelativeImages(body, notePath) {
   })
 }
 
-function rewriteNoteBody(note) {
+function rewriteNoteBody(note, noteIndex, onDisambiguate) {
   if (!note) {
     return ''
   }
   let markdown = note.body ?? ''
   markdown = rewriteObsidianEmbeds(markdown)
   markdown = rewriteRelativeImages(markdown, note.path)
+  markdown = rewriteWikilinks(markdown, noteIndex, onDisambiguate)
   return markdown
+}
+
+function rewriteWikilinks(body, noteIndex, onDisambiguate) {
+  // Replace [[target|alias]] or [[target]] with markdown links or styled spans
+  return body.replace(/\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g, (match, target, alias) => {
+    const display = (alias || target).trim()
+    const targetName = target.trim()
+    const matches = noteIndex[targetName] || []
+
+    if (matches.length === 0) {
+      // Missing note - use HTML span that won't be escaped
+      return `<span class="wikilink-missing">${escapeHtml(display)}</span>`
+    }
+
+    if (matches.length === 1) {
+      // Single match - create markdown link
+      const encodedPath = encodePathSegments(matches[0])
+      return `[${display}](/notes/${encodedPath})`
+    }
+
+    // Multiple matches - use special marker that will be handled by click handler
+    // We'll use a data attribute approach with HTML
+    const pathsAttr = matches.map(p => encodePathSegments(p)).join(',')
+    return `<span class="wikilink ambiguous" data-target="${escapeHtml(targetName)}" data-paths="${pathsAttr}">${escapeHtml(display)}</span>`
+  })
+}
+
+function escapeHtml(text) {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
 }
 
 function formatMetaValue(key, value) {
@@ -169,16 +214,17 @@ function ImageWithFallback({ src, alt }) {
   )
 }
 
-// Custom component for ReactMarkdown to handle wikilinks
-function createMarkdownComponents({ noteIndex, onNavigate, onDisambiguate }) {
+// Custom component for ReactMarkdown to handle wikilink clicks
+function createMarkdownComponents({ onNavigate, onDisambiguate }) {
   return {
     img: ({ src, alt }) => <ImageWithFallback src={src} alt={alt} />,
     a: ({ href, children }) => {
-      // Check if href is a wikilink-style reference
+      // Check if href is a wikilink-style reference to notes
       if (href?.startsWith('/notes/')) {
         return (
           <a
             href={href}
+            className="wikilink"
             onClick={(e) => {
               e.preventDefault()
               onNavigate(href.replace('/notes/', ''))
@@ -194,33 +240,32 @@ function createMarkdownComponents({ noteIndex, onNavigate, onDisambiguate }) {
         </a>
       )
     },
-    // Handle text nodes that might contain wikilinks
-    text: ({ value }) => {
-      if (!value || typeof value !== 'string') return value
-
-      // Split text by wikilink pattern
-      const parts = value.split(/(\[\[[^\]]+\]\])/g)
-
-      if (parts.length === 1) return value
-
-      return (
-        <>
-          {parts.map((part, i) => {
-            if (part.match(/^\[\[[^\]]+\]\]$/)) {
-              return (
-                <Wikilink
-                  key={i}
-                  raw={part}
-                  noteIndex={noteIndex}
-                  onNavigate={onNavigate}
-                  onDisambiguate={onDisambiguate}
-                />
-              )
-            }
-            return <span key={i}>{part}</span>
-          })}
-        </>
-      )
+    span: ({ node, children, ...props }) => {
+      const className = props.className || ''
+      
+      // Handle missing wikilinks
+      if (className.includes('wikilink-missing')) {
+        return <span className="wikilink-missing">{children}</span>
+      }
+      
+      // Handle ambiguous wikilinks
+      if (className.includes('wikilink') && className.includes('ambiguous')) {
+        const target = props['data-target']
+        const pathsStr = props['data-paths']
+        const paths = pathsStr ? pathsStr.split(',') : []
+        
+        return (
+          <span
+            className="wikilink ambiguous"
+            onClick={() => onDisambiguate(target, paths, children)}
+            style={{ cursor: 'pointer' }}
+          >
+            {children}
+          </span>
+        )
+      }
+      
+      return <span {...props}>{children}</span>
     },
   }
 }
@@ -355,7 +400,12 @@ function App() {
     return () => window.removeEventListener('navigate-to-note', handleNavigate)
   }, [])
 
-  const transformedBody = useMemo(() => rewriteNoteBody(note), [note])
+  // Define handleDisambiguate BEFORE transformedBody useMemo
+  const handleDisambiguate = useCallback((target, matches, displayText) => {
+    setDisambiguation({ target, matches, displayText })
+  }, [])
+
+  const transformedBody = useMemo(() => rewriteNoteBody(note, noteIndex, handleDisambiguate), [note, noteIndex, handleDisambiguate])
 
   const handleLogin = async (event) => {
     event.preventDefault()
@@ -444,10 +494,6 @@ function App() {
     handleSelectNote(path)
   }
 
-  const handleDisambiguate = useCallback((target, matches, displayText) => {
-    setDisambiguation({ target, matches, displayText })
-  }, [])
-
   const handleDisambiguationSelect = (path) => {
     setDisambiguation(null)
     handleSelectNote(path)
@@ -456,11 +502,10 @@ function App() {
   const markdownComponents = useMemo(
     () =>
       createMarkdownComponents({
-        noteIndex,
         onNavigate: handleSelectNote,
         onDisambiguate: handleDisambiguate,
       }),
-    [noteIndex, handleSelectNote, handleDisambiguate]
+    [handleSelectNote, handleDisambiguate]
   )
 
   if (authenticated === null) {
@@ -659,7 +704,7 @@ function App() {
                   <ReactMarkdown
                     children={transformedBody}
                     remarkPlugins={[remarkGfm]}
-                    rehypePlugins={[rehypeSanitize, rehypeHighlight]}
+                    rehypePlugins={[[rehypeSanitize, sanitizeSchema], rehypeHighlight]}
                     components={markdownComponents}
                   />
                 </div>
