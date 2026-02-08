@@ -1,9 +1,12 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, useCallback } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeHighlight from 'rehype-highlight'
 import rehypeSanitize from 'rehype-sanitize'
 import './App.css'
+import { Wikilink } from './components/Wikilink'
+import { DisambiguationModal } from './components/DisambiguationModal'
+import { LinkedMentions } from './components/LinkedMentions'
 
 const ATTACHMENTS_ROUTE = '/api/attachments'
 
@@ -166,6 +169,62 @@ function ImageWithFallback({ src, alt }) {
   )
 }
 
+// Custom component for ReactMarkdown to handle wikilinks
+function createMarkdownComponents({ noteIndex, onNavigate, onDisambiguate }) {
+  return {
+    img: ({ src, alt }) => <ImageWithFallback src={src} alt={alt} />,
+    a: ({ href, children }) => {
+      // Check if href is a wikilink-style reference
+      if (href?.startsWith('/notes/')) {
+        return (
+          <a
+            href={href}
+            onClick={(e) => {
+              e.preventDefault()
+              onNavigate(href.replace('/notes/', ''))
+            }}
+          >
+            {children}
+          </a>
+        )
+      }
+      return (
+        <a href={href} target="_blank" rel="noreferrer">
+          {children}
+        </a>
+      )
+    },
+    // Handle text nodes that might contain wikilinks
+    text: ({ value }) => {
+      if (!value || typeof value !== 'string') return value
+
+      // Split text by wikilink pattern
+      const parts = value.split(/(\[\[[^\]]+\]\])/g)
+
+      if (parts.length === 1) return value
+
+      return (
+        <>
+          {parts.map((part, i) => {
+            if (part.match(/^\[\[[^\]]+\]\]$/)) {
+              return (
+                <Wikilink
+                  key={i}
+                  raw={part}
+                  noteIndex={noteIndex}
+                  onNavigate={onNavigate}
+                  onDisambiguate={onDisambiguate}
+                />
+              )
+            }
+            return <span key={i}>{part}</span>
+          })}
+        </>
+      )
+    },
+  }
+}
+
 function App() {
   const [authenticated, setAuthenticated] = useState(null)
   const [health, setHealth] = useState(null)
@@ -186,6 +245,10 @@ function App() {
   const [searching, setSearching] = useState(false)
   const [searchError, setSearchError] = useState('')
   const [frontmatterOpen, setFrontmatterOpen] = useState(false)
+
+  // Wikilink state
+  const [noteIndex, setNoteIndex] = useState({})
+  const [disambiguation, setDisambiguation] = useState(null)
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -226,6 +289,17 @@ function App() {
       .then((res) => res.json())
       .then((data) => setHealth(data.status))
       .catch(() => setHealth('error'))
+  }, [authenticated])
+
+  // Fetch note index for wikilinks
+  useEffect(() => {
+    if (!authenticated) {
+      return
+    }
+    fetch('/api/notes/index')
+      .then((res) => res.json())
+      .then((data) => setNoteIndex(data.index || {}))
+      .catch(() => setNoteIndex({}))
   }, [authenticated])
 
   useEffect(() => {
@@ -269,6 +343,17 @@ function App() {
     setSearchResults([])
     setSearchError('')
   }, [searchQuery])
+
+  // Listen for navigation events from LinkedMentions
+  useEffect(() => {
+    const handleNavigate = (e) => {
+      if (e.detail?.path) {
+        handleSelectNote(e.detail.path)
+      }
+    }
+    window.addEventListener('navigate-to-note', handleNavigate)
+    return () => window.removeEventListener('navigate-to-note', handleNavigate)
+  }, [])
 
   const transformedBody = useMemo(() => rewriteNoteBody(note), [note])
 
@@ -327,10 +412,10 @@ function App() {
     })
   }
 
-  const handleSelectNote = (path) => {
+  const handleSelectNote = useCallback((path) => {
     setExpandedDirs((prev) => expandDirectorySet(prev, path))
     setSelectedPath(path)
-  }
+  }, [])
 
   const handleSearch = async (event) => {
     event.preventDefault()
@@ -358,6 +443,25 @@ function App() {
   const handleSearchResultClick = (path) => {
     handleSelectNote(path)
   }
+
+  const handleDisambiguate = useCallback((target, matches, displayText) => {
+    setDisambiguation({ target, matches, displayText })
+  }, [])
+
+  const handleDisambiguationSelect = (path) => {
+    setDisambiguation(null)
+    handleSelectNote(path)
+  }
+
+  const markdownComponents = useMemo(
+    () =>
+      createMarkdownComponents({
+        noteIndex,
+        onNavigate: handleSelectNote,
+        onDisambiguate: handleDisambiguate,
+      }),
+    [noteIndex, handleSelectNote, handleDisambiguate]
+  )
 
   if (authenticated === null) {
     return (
@@ -407,6 +511,9 @@ function App() {
   const noteTitle = note?.frontmatter?.title
     ? note.frontmatter.title
     : selectedPath?.split('/').pop()
+
+  // Get filename for backlinks (without .md extension)
+  const noteFilename = note ? selectedPath?.split('/').pop()?.replace(/\.md$/, '') : null
 
   return (
     <div className="app">
@@ -553,21 +660,26 @@ function App() {
                     children={transformedBody}
                     remarkPlugins={[remarkGfm]}
                     rehypePlugins={[rehypeSanitize, rehypeHighlight]}
-                    components={{
-                      img: ({ src, alt }) => <ImageWithFallback src={src} alt={alt} />,
-                      a: ({ href, children }) => (
-                        <a href={href} target="_blank" rel="noreferrer">
-                          {children}
-                        </a>
-                      ),
-                    }}
+                    components={markdownComponents}
                   />
                 </div>
+
+                {noteFilename && <LinkedMentions filename={noteFilename} />}
               </article>
             )}
           </section>
         </div>
       </div>
+
+      {disambiguation && (
+        <DisambiguationModal
+          target={disambiguation.target}
+          matches={disambiguation.matches}
+          displayText={disambiguation.displayText}
+          onSelect={handleDisambiguationSelect}
+          onCancel={() => setDisambiguation(null)}
+        />
+      )}
     </div>
   )
 }

@@ -11,7 +11,13 @@ services:
       - DATA_DIR=/data
       - ADMIN_USERNAME=admin
       - ADMIN_PASSWORD=admin
+    networks:
+      - npm-network
     restart: unless-stopped
 
 volumes:
   pinotes_lite_data:
+
+networks:
+  npm-network:
+    external: true

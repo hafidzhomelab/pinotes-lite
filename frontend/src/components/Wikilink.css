@@ -1,0 +1,18 @@
+.wikilink {
+  color: #2563eb;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.wikilink:hover {
+  text-decoration: underline;
+}
+
+.wikilink.ambiguous {
+  border-bottom: 1px dotted #2563eb;
+}
+
+.wikilink-missing {
+  color: #6b7280;
+  cursor: default;
+}
